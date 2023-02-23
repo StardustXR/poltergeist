@@ -1,0 +1,45 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'poltergeist'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=poltergeist",
+                    "--package=poltergeist"
+                ],
+                "filter": {
+                    "name": "poltergeist",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'poltergeist'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=poltergeist",
+                    "--package=poltergeist"
+                ],
+                "filter": {
+                    "name": "poltergeist",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
