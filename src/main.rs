@@ -21,7 +21,6 @@ use stardust_xr_fusion::{
 use stardust_xr_molecules::{
 	keyboard::{KeyboardPanelHandler, KeyboardPanelRelay},
 	touch_plane::TouchPlane,
-	DebugSettings, VisualDebug,
 };
 use std::sync::{Arc, Weak};
 
@@ -72,14 +71,14 @@ impl Poltergeist {
 			&ResourceID::new_namespaced("poltergeist", "crt"),
 		)?;
 		let acceptor = ItemAcceptor::create(&root, Transform::default(), &bound_field)?;
-		let mut touch_plane = TouchPlane::new(
+		let touch_plane = TouchPlane::new(
 			&root,
 			Transform::from_position([0.0, 0.268524, 0.0]),
 			[TOUCH_PLANE_WIDTH, TOUCH_PLANE_HEIGHT],
 			0.172038,
 		)?;
 		// touch_plane.input_handler().set_transform(None, Transform::from_position_scale([TOUCH_PLANE_WIDTH * -0.5, TOUCH_PLANE_HEIGHT * 0.5, 0.0], [TOUCH_PLANE_WIDTH, TOUCH_PLANE_HEIGHT,]))
-		touch_plane.set_debug(Some(DebugSettings::default()));
+		// touch_plane.set_debug(Some(DebugSettings::default()));
 		let poltergeist = Arc::new_cyclic(|weak| {
 			Mutex::new(Poltergeist {
 				_self_ref: weak.clone(),
