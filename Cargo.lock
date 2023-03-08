@@ -390,6 +390,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "input-event-codes"
+version = "5.16.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b6b0f8557f596a2db592f172015c40d0c149e16a956c7848e733d663f2c6636"
+
+[[package]]
 name = "js-sys"
 version = "0.3.61"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -448,6 +454,15 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn",
+]
+
+[[package]]
+name = "map-range"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dee4036c09f24ea403edcbb911a14dd641d13e181f85eff25fc3cbada6ef90f8"
+dependencies = [
+ "num-traits",
 ]
 
 [[package]]
@@ -623,7 +638,9 @@ version = "0.1.0"
 dependencies = [
  "color-eyre",
  "glam 0.23.0",
+ "input-event-codes",
  "manifest-dir-macros",
+ "map-range",
  "mint",
  "rustc-hash",
  "stardust-xr-fusion",
@@ -888,9 +905,9 @@ dependencies = [
 
 [[package]]
 name = "stardust-xr-molecules"
-version = "0.21.1"
+version = "0.23.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4c16d448b75aff896519f94910a525bf5588a53cf54d5256a7eef05f604ffce4"
+checksum = "44e840a893484f7c9445dde235090ad9cf829191f2bf2b913b5992cbf52ccbd8"
 dependencies = [
  "color-rs",
  "glam 0.23.0",
