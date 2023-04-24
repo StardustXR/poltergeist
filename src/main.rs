@@ -1,17 +1,17 @@
+pub mod delta;
+
 use color_eyre::eyre::Result;
-use glam::{vec3, Quat, Vec3};
+use delta::Delta;
+use glam::Quat;
 use input_event_codes::BTN_LEFT;
 use manifest_dir_macros::directory_relative_path;
-use map_range::MapRange;
-use mint::{Vector2, Vector3};
 use stardust_xr_fusion::{
 	client::{Client, FrameInfo, RootHandler},
 	core::values::Transform,
 	drawable::{MaterialParameter, Model, ResourceID},
 	fields::BoxField,
-	input::InputDataType,
 	items::{
-		panel::{self, PanelItem, PanelItemHandler, PanelItemInitData, ToplevelInfo},
+		panel::{self, PanelItem, PanelItemHandler, PanelItemInitData, SurfaceID, ToplevelInfo},
 		Item, ItemAcceptor, ItemAcceptorHandler,
 	},
 	node::NodeError,
@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
 
 struct CapturedItem {
 	uid: String,
-	toplevel_info: Option<ToplevelInfo>,
+	toplevel_info: Delta<Option<ToplevelInfo>>,
 	_keyboard_relay: KeyboardPanelRelay,
 }
 
@@ -71,11 +71,13 @@ impl Poltergeist {
 			&ResourceID::new_namespaced("poltergeist", "crt"),
 		)?;
 		let acceptor = ItemAcceptor::create(&root, Transform::default(), &bound_field)?;
-		let touch_plane = TouchPlane::new(
+		let touch_plane = TouchPlane::create(
 			&root,
 			Transform::from_position([0.0, 0.268524, 0.0]),
 			[TOUCH_PLANE_WIDTH, TOUCH_PLANE_HEIGHT],
 			0.172038,
+			0.0..1.0,
+			0.0..1.0,
 		)?;
 		// touch_plane.input_handler().set_transform(None, Transform::from_position_scale([TOUCH_PLANE_WIDTH * -0.5, TOUCH_PLANE_HEIGHT * 0.5, 0.0], [TOUCH_PLANE_WIDTH, TOUCH_PLANE_HEIGHT,]))
 		// touch_plane.set_debug(Some(DebugSettings::default()));
@@ -97,52 +99,34 @@ impl RootHandler for Poltergeist {
 		self.touch_plane.update();
 
 		let Some(captured_item) = self.captured.as_mut() else {return};
-		let captured_item_info = captured_item.lock_wrapped();
-		let Some(toplevel_info) = captured_item_info.toplevel_info.as_ref() else {return};
+
+		if let Some(delta) = captured_item.wrapped().lock().toplevel_info.delta() {
+			if let Some(info) = delta {
+				self.touch_plane.x_range = 0.0..info.size.x as f32;
+				self.touch_plane.y_range = 0.0..info.size.y as f32;
+			}
+		}
+
 		if self.touch_plane.touch_started() {
 			println!("touch started");
-			let _ = captured_item.node().pointer_button(BTN_LEFT!(), true);
+			let _ = captured_item
+				.node()
+				.pointer_button(&SurfaceID::Toplevel, BTN_LEFT!(), true);
 		}
-		let touch_point = self
-			.touch_plane
-			.interacting_inputs()
-			.into_iter()
-			.filter_map(|i| match &i.input {
-				InputDataType::Pointer(p) => {
-					let normal = vec3(0.0, 0.0, -1.0);
-					let denom = Vec3::from(p.direction()).dot(normal);
-					if denom.abs() <= 0.0001 {
-						return None;
-					}
-					let t = -Vec3::from(p.origin).dot(normal) / denom;
-					if t < 0.0 {
-						return None;
-					}
-					Some(Vector3::from(
-						Vec3::from(p.origin) + (Vec3::from(p.direction()) * t),
-					))
-				}
-				InputDataType::Hand(h) => Some(dbg!(h.index.tip.position)),
-				InputDataType::Tip(t) => Some(t.origin),
-			})
-			.reduce(|a, b| if a.z < b.z { a } else { b })
-			.map(|v| {
-				let half_width = TOUCH_PLANE_WIDTH * 0.5;
-				let half_height = TOUCH_PLANE_HEIGHT * 0.5;
-				Vector2::from([
-					v.x.map_range(-half_width..half_width, 0.0..toplevel_info.size.x as f32),
-					v.y.map_range(half_height..-half_height, 0.0..toplevel_info.size.y as f32),
-				])
-			});
+		let touch_point = self.touch_plane.hover_points().first().cloned();
 		if let Some(touch_point) = touch_point {
 			// dbg!(toplevel_info.size);
 			// dbg!(touch_point);
-			let _ = captured_item.node().pointer_motion(touch_point);
+			let _ = captured_item
+				.node()
+				.pointer_motion(&SurfaceID::Toplevel, touch_point);
 		}
 
 		if self.touch_plane.touch_stopped() {
 			println!("touch stopped");
-			let _ = captured_item.node().pointer_button(BTN_LEFT!(), false);
+			let _ = captured_item
+				.node()
+				.pointer_button(&SurfaceID::Toplevel, BTN_LEFT!(), false);
 		}
 	}
 }
@@ -167,7 +151,8 @@ impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 			&[panel::State::Activated, panel::State::Maximized],
 			None,
 		);
-		let _ = item.apply_toplevel_material(&self.model, SCREEN_MATERIAL_INDEX);
+		let _ =
+			item.apply_surface_material(&SurfaceID::Toplevel, &self.model, SCREEN_MATERIAL_INDEX);
 		let _ = self.model.set_material_parameter(
 			SCREEN_MATERIAL_INDEX,
 			"alpha_min",
@@ -179,13 +164,15 @@ impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 			Transform::from_position([0.070582, 0.052994, 0.000832]),
 			&self.bound_field,
 			&item,
+			SurfaceID::Toplevel,
 		)
 		.unwrap();
-		item.pointer_set_active(true).unwrap();
+		let mut toplevel_info = Delta::new(init_data.toplevel);
+		toplevel_info.mark_changed();
 		self.captured.replace(
 			item.wrap(CapturedItem {
 				uid: uid.to_string(),
-				toplevel_info: init_data.toplevel,
+				toplevel_info,
 				_keyboard_relay: keyboard_relay,
 			})
 			.unwrap(),
@@ -199,6 +186,6 @@ impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 }
 impl PanelItemHandler for CapturedItem {
 	fn commit_toplevel(&mut self, state: Option<ToplevelInfo>) {
-		self.toplevel_info = state;
+		*self.toplevel_info.value_mut() = state;
 	}
 }
