@@ -130,7 +130,6 @@ impl RootHandler for Poltergeist {
 		}
 	}
 }
-const SCREEN_MATERIAL_INDEX: u32 = 3;
 impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 	fn captured(&mut self, uid: &str, item: PanelItem, init_data: PanelItemInitData) {
 		if let Some(captured) = self.captured.take() {
@@ -151,13 +150,9 @@ impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 			&[panel::State::Activated, panel::State::Maximized],
 			None,
 		);
-		let _ =
-			item.apply_surface_material(&SurfaceID::Toplevel, &self.model, SCREEN_MATERIAL_INDEX);
-		let _ = self.model.set_material_parameter(
-			SCREEN_MATERIAL_INDEX,
-			"alpha_min",
-			MaterialParameter::Float(1.0),
-		);
+		let screen = self.model.model_part("Screen").unwrap();
+		let _ = item.apply_surface_material(&SurfaceID::Toplevel, &screen);
+		let _ = screen.set_material_parameter("alpha_min", MaterialParameter::Float(1.0));
 
 		let keyboard_relay = KeyboardPanelHandler::create(
 			&self.root,
