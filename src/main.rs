@@ -1,17 +1,15 @@
-pub mod delta;
-
 use color_eyre::eyre::Result;
-use delta::Delta;
 use glam::Quat;
 use input_event_codes::BTN_LEFT;
 use manifest_dir_macros::directory_relative_path;
+use mint::Vector2;
 use stardust_xr_fusion::{
 	client::{Client, FrameInfo, RootHandler},
 	core::values::Transform,
 	drawable::{MaterialParameter, Model, ResourceID},
 	fields::BoxField,
 	items::{
-		panel::{self, PanelItem, PanelItemHandler, PanelItemInitData, SurfaceID, ToplevelInfo},
+		panel::{ChildInfo, Geometry, PanelItem, PanelItemHandler, PanelItemInitData, SurfaceID},
 		Item, ItemAcceptor, ItemAcceptorHandler,
 	},
 	node::NodeError,
@@ -19,10 +17,11 @@ use stardust_xr_fusion::{
 	HandlerWrapper, Mutex,
 };
 use stardust_xr_molecules::{
-	keyboard::{KeyboardPanelHandler, KeyboardPanelRelay},
+	keyboard::{create_keyboard_panel_handler, KeyboardPanelHandler},
 	touch_plane::TouchPlane,
 };
-use std::sync::{Arc, Weak};
+use std::sync::Arc;
+use tokio::sync::mpsc;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -42,18 +41,19 @@ async fn main() -> Result<()> {
 
 struct CapturedItem {
 	uid: String,
-	toplevel_info: Delta<Option<ToplevelInfo>>,
-	_keyboard_relay: KeyboardPanelRelay,
+	size_tx: mpsc::Sender<Vector2<u32>>,
+	_keyboard_relay: KeyboardPanelHandler,
 }
 
 type AcceptorHandler = HandlerWrapper<ItemAcceptor<PanelItem>, Poltergeist>;
 struct Poltergeist {
-	_self_ref: Weak<Mutex<Poltergeist>>,
 	root: Spatial,
 	bound_field: BoxField,
 	model: Model,
 	captured: Option<HandlerWrapper<PanelItem, CapturedItem>>,
 	touch_plane: TouchPlane,
+	size_tx: mpsc::Sender<Vector2<u32>>,
+	size_rx: mpsc::Receiver<Vector2<u32>>,
 }
 const TOUCH_PLANE_WIDTH: f32 = 0.403122;
 const TOUCH_PLANE_HEIGHT: f32 = 0.313059;
@@ -81,47 +81,42 @@ impl Poltergeist {
 		)?;
 		// touch_plane.input_handler().set_transform(None, Transform::from_position_scale([TOUCH_PLANE_WIDTH * -0.5, TOUCH_PLANE_HEIGHT * 0.5, 0.0], [TOUCH_PLANE_WIDTH, TOUCH_PLANE_HEIGHT,]))
 		// touch_plane.set_debug(Some(DebugSettings::default()));
-		let poltergeist = Arc::new_cyclic(|weak| {
-			Mutex::new(Poltergeist {
-				_self_ref: weak.clone(),
-				root,
-				bound_field,
-				model,
-				captured: None,
-				touch_plane,
-			})
-		});
+		let (size_tx, size_rx) = mpsc::channel(2);
+		let poltergeist = Arc::new(Mutex::new(Poltergeist {
+			root,
+			bound_field,
+			model,
+			captured: None,
+			touch_plane,
+			size_tx,
+			size_rx,
+		}));
 		Ok((poltergeist.clone(), acceptor.wrap_raw(poltergeist)?))
 	}
 }
 impl RootHandler for Poltergeist {
 	fn frame(&mut self, _info: FrameInfo) {
 		self.touch_plane.update();
+		while let Ok(size) = self.size_rx.try_recv() {
+			self.touch_plane.x_range = 0.0..size.x as f32;
+			self.touch_plane.y_range = 0.0..size.y as f32;
+		}
 
 		let Some(captured_item) = self.captured.as_mut() else {return};
 
-		if let Some(delta) = captured_item.wrapped().lock().toplevel_info.delta() {
-			if let Some(info) = delta {
-				self.touch_plane.x_range = 0.0..info.size.x as f32;
-				self.touch_plane.y_range = 0.0..info.size.y as f32;
-			}
+		let touch_point = self.touch_plane.hover_points().first().cloned();
+		if let Some(touch_point) = touch_point {
+			// dbg!(touch_point);
+			let _ = captured_item
+				.node()
+				.pointer_motion(&SurfaceID::Toplevel, touch_point);
 		}
-
 		if self.touch_plane.touch_started() {
 			println!("touch started");
 			let _ = captured_item
 				.node()
 				.pointer_button(&SurfaceID::Toplevel, BTN_LEFT!(), true);
 		}
-		let touch_point = self.touch_plane.hover_points().first().cloned();
-		if let Some(touch_point) = touch_point {
-			// dbg!(toplevel_info.size);
-			// dbg!(touch_point);
-			let _ = captured_item
-				.node()
-				.pointer_motion(&SurfaceID::Toplevel, touch_point);
-		}
-
 		if self.touch_plane.touch_stopped() {
 			println!("touch stopped");
 			let _ = captured_item
@@ -131,7 +126,7 @@ impl RootHandler for Poltergeist {
 	}
 }
 impl ItemAcceptorHandler<PanelItem> for Poltergeist {
-	fn captured(&mut self, uid: &str, item: PanelItem, init_data: PanelItemInitData) {
+	fn captured(&mut self, uid: &str, item: PanelItem, _init_data: PanelItemInitData) {
 		if let Some(captured) = self.captured.take() {
 			let _ = captured.node().release();
 		}
@@ -145,16 +140,12 @@ impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 				[1.0; 3],
 			),
 		);
-		let _ = item.configure_toplevel(
-			Some([640, 480].into()),
-			&[panel::State::Activated, panel::State::Maximized],
-			None,
-		);
+		let _ = item.set_toplevel_size([640, 480].into());
 		let screen = self.model.model_part("Screen").unwrap();
 		let _ = item.apply_surface_material(&SurfaceID::Toplevel, &screen);
 		let _ = screen.set_material_parameter("alpha_min", MaterialParameter::Float(1.0));
 
-		let keyboard_relay = KeyboardPanelHandler::create(
+		let _keyboard_relay = create_keyboard_panel_handler(
 			&self.root,
 			Transform::from_position([0.070582, 0.052994, 0.000832]),
 			&self.bound_field,
@@ -162,13 +153,11 @@ impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 			SurfaceID::Toplevel,
 		)
 		.unwrap();
-		let mut toplevel_info = Delta::new(init_data.toplevel);
-		toplevel_info.mark_changed();
 		self.captured.replace(
 			item.wrap(CapturedItem {
 				uid: uid.to_string(),
-				toplevel_info,
-				_keyboard_relay: keyboard_relay,
+				size_tx: self.size_tx.clone(),
+				_keyboard_relay,
 			})
 			.unwrap(),
 		);
@@ -180,7 +169,11 @@ impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 	}
 }
 impl PanelItemHandler for CapturedItem {
-	fn commit_toplevel(&mut self, state: Option<ToplevelInfo>) {
-		*self.toplevel_info.value_mut() = state;
+	fn toplevel_size_changed(&mut self, size: mint::Vector2<u32>) {
+		let _ = self.size_tx.try_send(size);
 	}
+
+	fn new_child(&mut self, _uid: &str, _info: ChildInfo) {}
+	fn reposition_child(&mut self, _uid: &str, _geometry: Geometry) {}
+	fn drop_child(&mut self, _uid: &str) {}
 }
