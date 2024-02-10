@@ -4,16 +4,16 @@ use input_event_codes::BTN_LEFT;
 use manifest_dir_macros::directory_relative_path;
 use mint::Vector2;
 use stardust_xr_fusion::{
-	client::{Client, FrameInfo, RootHandler},
-	core::values::Transform,
-	drawable::{MaterialParameter, Model, ResourceID},
+	client::{Client, ClientState, FrameInfo, RootHandler},
+	core::values::ResourceID,
+	drawable::{MaterialParameter, Model, ModelPartAspect},
 	fields::BoxField,
 	items::{
 		panel::{ChildInfo, Geometry, PanelItem, PanelItemHandler, PanelItemInitData, SurfaceID},
-		Item, ItemAcceptor, ItemAcceptorHandler,
+		ItemAcceptor, ItemAcceptorHandler, ItemAspect,
 	},
-	node::NodeError,
-	spatial::Spatial,
+	node::{NodeError, NodeType},
+	spatial::{Spatial, SpatialAspect, Transform},
 	HandlerWrapper, Mutex,
 };
 use stardust_xr_molecules::{
@@ -22,6 +22,8 @@ use stardust_xr_molecules::{
 };
 use std::sync::Arc;
 use tokio::sync::mpsc;
+
+// TODO: use model nodes and get_local_bounds to avoid hardcoding any numbers
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
@@ -59,21 +61,21 @@ const TOUCH_PLANE_WIDTH: f32 = 0.403122;
 const TOUCH_PLANE_HEIGHT: f32 = 0.313059;
 impl Poltergeist {
 	fn new(client: &Arc<Client>) -> Result<(Arc<Mutex<Self>>, AcceptorHandler), NodeError> {
-		let root = Spatial::create(client.get_root(), Transform::default(), true)?;
+		let root = Spatial::create(client.get_root(), Transform::identity(), true)?;
 		let bound_field = BoxField::create(
 			&root,
-			Transform::from_position([0.0, 0.227573, -0.084663]),
+			Transform::from_translation([0.0, 0.227573, -0.084663]),
 			[0.471, 0.46, 0.168],
 		)?;
 		let model = Model::create(
 			&root,
-			Transform::default(),
+			Transform::identity(),
 			&ResourceID::new_namespaced("poltergeist", "crt"),
 		)?;
-		let acceptor = ItemAcceptor::create(&root, Transform::default(), &bound_field)?;
+		let acceptor = ItemAcceptor::create(&root, Transform::identity(), &bound_field)?;
 		let touch_plane = TouchPlane::create(
 			&root,
-			Transform::from_position([0.0, 0.268524, 0.0]),
+			Transform::from_translation([0.0, 0.268524, 0.0]),
 			[TOUCH_PLANE_WIDTH, TOUCH_PLANE_HEIGHT],
 			0.172038,
 			0.0..1.0,
@@ -102,7 +104,9 @@ impl RootHandler for Poltergeist {
 			self.touch_plane.y_range = 0.0..size.y as f32;
 		}
 
-		let Some(captured_item) = self.captured.as_mut() else {return};
+		let Some(captured_item) = self.captured.as_mut() else {
+			return;
+		};
 
 		let touch_point = self.touch_plane.hover_points().first().cloned();
 		if let Some(touch_point) = touch_point {
@@ -124,30 +128,38 @@ impl RootHandler for Poltergeist {
 				.pointer_button(&SurfaceID::Toplevel, BTN_LEFT!(), false);
 		}
 	}
+
+	fn save_state(&mut self) -> ClientState {
+		ClientState {
+			data: None,
+			root: Some(self.root.alias()),
+			spatial_anchors: Default::default(),
+		}
+	}
 }
 impl ItemAcceptorHandler<PanelItem> for Poltergeist {
-	fn captured(&mut self, uid: &str, item: PanelItem, _init_data: PanelItemInitData) {
+	fn captured(&mut self, uid: String, item: PanelItem, _init_data: PanelItemInitData) {
 		if let Some(captured) = self.captured.take() {
 			let _ = captured.node().release();
 		}
 		println!("Captured {uid} into Poltergeist");
 
-		let _ = item.set_transform(
-			Some(&self.root),
-			Transform::from_position_rotation_scale(
+		let _ = item.set_relative_transform(
+			&self.root,
+			Transform::from_translation_rotation_scale(
 				[0.0, 0.268524, 0.05],
 				Quat::IDENTITY,
 				[1.0; 3],
 			),
 		);
-		let _ = item.set_toplevel_size([640, 480].into());
+		let _ = item.set_toplevel_size([640, 480]);
 		let screen = self.model.model_part("Screen").unwrap();
 		let _ = item.apply_surface_material(&SurfaceID::Toplevel, &screen);
 		let _ = screen.set_material_parameter("alpha_min", MaterialParameter::Float(1.0));
 
 		let _keyboard_relay = create_keyboard_panel_handler(
 			&self.root,
-			Transform::from_position([0.070582, 0.052994, 0.000832]),
+			Transform::from_translation([0.070582, 0.052994, 0.000832]),
 			&self.bound_field,
 			&item,
 			SurfaceID::Toplevel,
@@ -162,7 +174,7 @@ impl ItemAcceptorHandler<PanelItem> for Poltergeist {
 			.unwrap(),
 		);
 	}
-	fn released(&mut self, uid: &str) {
+	fn released(&mut self, uid: String) {
 		if self.captured.is_some() && self.captured.as_ref().unwrap().lock_wrapped().uid == uid {
 			self.captured.take();
 		}
